@@ -1,7 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { ChatGoogleGenerativeAI } from 'langchain/google';
-import { MemorySaver } from 'langgraph/checkpoint/memory';
+import { MemorySaver } from 'langgraph';
 import { StateGraph, END } from 'langgraph';
 import { HumanMessage, AIMessage, SystemMessage, BaseMessage } from 'langchain/schema';
 
