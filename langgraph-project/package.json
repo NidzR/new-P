@@ -2,7 +2,7 @@
   "name": "langgraph-project",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "app.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -11,6 +11,11 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@langchain/community": "^0.3.39",
+    "@langchain/core": "^0.3.43",
+    "@langchain/langgraph": "^0.2.62",
+    "@langchain/langgraph-sdk": "^0.0.62",
+    "@langchain/openai": "^0.5.3",
     "@types/dotenv": "^6.1.1",
     "@types/express": "^5.0.1",
     "@types/node": "^22.14.0",

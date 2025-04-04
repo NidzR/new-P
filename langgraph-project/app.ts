@@ -1,9 +1,9 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import { ChatGoogleGenerativeAI } from 'langchain/google';
-import { MemorySaver } from 'langgraph';
-import { StateGraph, END } from 'langgraph';
-import { HumanMessage, AIMessage, SystemMessage, BaseMessage } from 'langchain/schema';
+import { MemorySaver } from 'langgraph/checkpoint/memory';
+import { StateGraph, END } from 'langgraph/graph';
+import { HumanMessage, AIMessage, SystemMessage, BaseMessage } from 'langchain/core/messages';
 
 // Load environment variables
 dotenv.config();
@@ -93,18 +93,24 @@ const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`Server is running on http://127.0.0.1:${PORT}`);
 });
-// Define the new node to modify price
-async function modifyPriceNode(state: GraphState) {
-    // Logic to modify price
-    console.log("--- Modifying Price ---");
-    return { messages: [new AIMessage("Price modified successfully!")] };
-}
-
 // Add the new node to the workflow
 workflow.addNode('modify_price', modifyPriceNode);
 
 // Add an edge from 'gemini_caller' to 'modify_price'
 workflow.addEdge('gemini_caller', 'modify_price');
 
+// Define the 'modify_price' node function
+async function modifyPriceNode(state: GraphState) {
+  console.log("--- Modifying Price ---");
+
+  // Example logic to modify a price (this is just a placeholder)
+  const modifiedMessage = new AIMessage("The price has been modified as per your request.");
+  return { messages: [...state.messages, modifiedMessage] };
+}
+
+// Add the 'modify_price' node to the workflow
+workflow.addNode('modify_price', modifyPriceNode);
+
 // Add an edge from 'modify_price' to END
+workflow.addEdge('modify_price', END);
 workflow.addEdge('modify_price', END);

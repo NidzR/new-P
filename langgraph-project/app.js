@@ -48,9 +48,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 var express_1 = require("express");
 var dotenv_1 = require("dotenv");
 var google_1 = require("langchain/google");
-var langgraph_1 = require("langgraph");
-var langgraph_2 = require("langgraph");
-var schema_1 = require("langchain/schema");
+var memory_1 = require("langgraph/checkpoint/memory");
+var graph_1 = require("langgraph/graph");
+var messages_1 = require("langchain/core/messages");
 // Load environment variables
 dotenv_1.default.config();
 // Configuration
@@ -62,7 +62,7 @@ if (!GOOGLE_API_KEY) {
     process.exit(1);
 }
 // Initialize the Graph workflow
-var workflow = new langgraph_2.StateGraph();
+var workflow = new graph_1.StateGraph();
 // Define the node to call the Gemini model
 function callGeminiModel(state) {
     return __awaiter(this, void 0, void 0, function () {
@@ -75,7 +75,7 @@ function callGeminiModel(state) {
                         model: "gemini-1.5-flash",
                         googleApiKey: GOOGLE_API_KEY,
                     });
-                    messagesToSend = __spreadArray([new schema_1.SystemMessage(SYSTEM_MESSAGE_CONTENT)], state.messages, true);
+                    messagesToSend = __spreadArray([new messages_1.SystemMessage(SYSTEM_MESSAGE_CONTENT)], state.messages, true);
                     return [4 /*yield*/, model.invoke(messagesToSend)];
                 case 1:
                     response = _a.sent();
@@ -87,9 +87,9 @@ function callGeminiModel(state) {
 // Define the flow
 workflow.addNode('gemini_caller', callGeminiModel);
 workflow.setEntryPoint('gemini_caller');
-workflow.addEdge('gemini_caller', langgraph_2.END);
+workflow.addEdge('gemini_caller', graph_1.END);
 // Initialize memory to handle state persistence
-var memory = new langgraph_1.MemorySaver();
+var memory = new memory_1.MemorySaver();
 var langgraphApp = workflow.compile({ checkpointer: memory });
 // Create the Express server
 var app = (0, express_1.default)();
@@ -103,7 +103,7 @@ app.post('/invoke', function (req, res) { return __awaiter(void 0, void 0, void 
                 userMessage = req.body.message;
                 conversationId = req.body.conversation_id;
                 console.log("--- Received Request (ID: ".concat(conversationId, "): ").concat(userMessage, " ---"));
-                inputs = { messages: [new schema_1.HumanMessage(userMessage)] };
+                inputs = { messages: [new messages_1.HumanMessage(userMessage)] };
                 config = { configurable: { thread_id: conversationId } };
                 _a.label = 1;
             case 1:
@@ -112,7 +112,7 @@ app.post('/invoke', function (req, res) { return __awaiter(void 0, void 0, void 
             case 2:
                 finalState = _a.sent();
                 aiResponse = finalState.messages[finalState.messages.length - 1];
-                if (aiResponse instanceof schema_1.AIMessage) {
+                if (aiResponse instanceof messages_1.AIMessage) {
                     res.json({
                         response: aiResponse.content,
                         conversation_id: conversationId,
@@ -140,19 +140,23 @@ var PORT = process.env.PORT || 8000;
 app.listen(PORT, function () {
     console.log("Server is running on http://127.0.0.1:".concat(PORT));
 });
-// Define the new node to modify price
-function modifyPriceNode(state) {
-    return __awaiter(this, void 0, void 0, function () {
-        return __generator(this, function (_a) {
-            // Logic to modify price
-            console.log("--- Modifying Price ---");
-            return [2 /*return*/, { messages: [new schema_1.AIMessage("Price modified successfully!")] }];
-        });
-    });
-}
 // Add the new node to the workflow
 workflow.addNode('modify_price', modifyPriceNode);
 // Add an edge from 'gemini_caller' to 'modify_price'
 workflow.addEdge('gemini_caller', 'modify_price');
+// Define the 'modify_price' node function
+function modifyPriceNode(state) {
+    return __awaiter(this, void 0, void 0, function () {
+        var modifiedMessage;
+        return __generator(this, function (_a) {
+            console.log("--- Modifying Price ---");
+            modifiedMessage = new messages_1.AIMessage("The price has been modified as per your request.");
+            return [2 /*return*/, { messages: __spreadArray(__spreadArray([], state.messages, true), [modifiedMessage], false) }];
+        });
+    });
+}
+// Add the 'modify_price' node to the workflow
+workflow.addNode('modify_price', modifyPriceNode);
 // Add an edge from 'modify_price' to END
-workflow.addEdge('modify_price', langgraph_2.END);
+workflow.addEdge('modify_price', graph_1.END);
+workflow.addEdge('modify_price', graph_1.END);
