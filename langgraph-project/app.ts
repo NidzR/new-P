@@ -1,116 +1,125 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { ChatGoogleGenerativeAI } from 'langchain/google';
-import { MemorySaver } from 'langgraph/checkpoint/memory';
-import { StateGraph, END } from 'langgraph/graph';
-import { HumanMessage, AIMessage, SystemMessage, BaseMessage } from 'langchain/core/messages';
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { MemorySaver } from "@langgraphjs/langgraph/checkpoint/memory";
+import { StateGraph, END } from "@langgraphjs/langgraph/graph";
+import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 
-// Load environment variables
+// Initialize environment
 dotenv.config();
 
 // Configuration
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-const SYSTEM_MESSAGE_CONTENT = "You are a product manager. Ask the user if they have a project. If they try to ask about something else, redirect them back to the product management topic.";
-
-// Check if the Google API Key is present
 if (!GOOGLE_API_KEY) {
-  console.error("Google API Key not configured. Please set GOOGLE_API_KEY in the .env file.");
+  console.error("Missing GOOGLE_API_KEY in .env");
   process.exit(1);
 }
 
-// Define the graph state (using memory for conversation history)
-type GraphState = {
-  messages: BaseMessage[];
-};
-
-// Initialize the Graph workflow
-const workflow = new StateGraph<GraphState>();
-
-// Define the node to call the Gemini model
-async function callGeminiModel(state: GraphState) {
-  console.log("--- Calling Gemini ---");
-
-  const model = new ChatGoogleGenerativeAI({
-    model: "gemini-1.5-flash",
-    googleApiKey: GOOGLE_API_KEY,
-  });
-
-  // Add system message to conversation history
-  const messagesToSend = [new SystemMessage(SYSTEM_MESSAGE_CONTENT), ...state.messages];
-  const response = await model.invoke(messagesToSend);
-
-  return { messages: [response] };
-}
-
-// Define the flow
-workflow.addNode('gemini_caller', callGeminiModel);
-workflow.setEntryPoint('gemini_caller');
-workflow.addEdge('gemini_caller', END);
-
-// Initialize memory to handle state persistence
-const memory = new MemorySaver();
-const langgraphApp = workflow.compile({ checkpointer: memory });
-
-// Create the Express server
+// App setup
 const app = express();
 app.use(express.json());
 
-// Define the API endpoint
-app.post('/invoke', async (req, res) => {
-  const userMessage = req.body.message;
-  const conversationId = req.body.conversation_id;
+// Define state type
+interface GraphState {
+  messages: (HumanMessage | AIMessage | SystemMessage)[];
+  conversationStage?: string;
+}
 
-  console.log(`--- Received Request (ID: ${conversationId}): ${userMessage} ---`);
+// Create workflow
+const workflow = new StateGraph<GraphState>({ channels: {} });
 
-  const inputs = { messages: [new HumanMessage(userMessage)] };
-  const config = { configurable: { thread_id: conversationId } };
+// Nodes
+async function greetingNode(state: GraphState) {
+  return {
+    messages: [new AIMessage("Welcome! Let's discuss your project.")],
+    conversationStage: "greeting"
+  };
+}
 
+async function requirementsNode(state: GraphState) {
+  return {
+    messages: [new AIMessage("What are your key requirements?")],
+    conversationStage: "requirements"
+  };
+}
+
+async function budgetNode(state: GraphState) {
+  return {
+    messages: [new AIMessage("What's your budget estimate?")],
+    conversationStage: "budget"
+  };
+}
+
+async function timelineNode(state: GraphState) {
+  return {
+    messages: [new AIMessage("What's your timeline?")],
+    conversationStage: "timeline"
+  };
+}
+
+async function geminiNode(state: GraphState) {
+  const model = new ChatGoogleGenerativeAI({
+    model: "gemini-1.5-flash",
+    apiKey: GOOGLE_API_KEY
+  });
+
+  const response = await model.invoke([
+    new SystemMessage("You're a product management assistant."),
+    ...state.messages
+  ]);
+
+  return {
+    messages: [response],
+    conversationStage: "analysis"
+  };
+}
+
+// Add nodes
+workflow.addNode("greeting", greetingNode);
+workflow.addNode("requirements", requirementsNode);
+workflow.addNode("budget", budgetNode);
+workflow.addNode("timeline", timelineNode);
+workflow.addNode("gemini", geminiNode);
+
+// Define flow
+workflow.setEntryPoint("greeting");
+workflow.addEdge("greeting", "requirements");
+workflow.addEdge("requirements", "budget");
+workflow.addEdge("budget", "timeline");
+workflow.addEdge("timeline", "gemini");
+workflow.addEdge("gemini", END);
+
+// Compile with memory
+const memory = new MemorySaver();
+const appGraph = workflow.compile({ checkpointer: memory });
+
+// API endpoint
+app.post('/chat', async (req, res) => {
   try {
-    const finalState = await langgraphApp.invoke(inputs, config);
-    const aiResponse = finalState.messages[finalState.messages.length - 1];
-
-    if (aiResponse instanceof AIMessage) {
-      res.json({
-        response: aiResponse.content,
-        conversation_id: conversationId,
-      });
-    } else {
-      res.status(500).send("Unexpected response from AI.");
+    const { message, conversation_id } = req.body;
+    if (!message || !conversation_id) {
+      return res.status(400).json({ error: "Missing message or conversation_id" });
     }
+
+    const result = await appGraph.invoke(
+      { messages: [new HumanMessage(message)] },
+      { configurable: { thread_id: conversation_id } }
+    );
+
+    const lastMessage = result.messages[result.messages.length - 1];
+    res.json({
+      response: lastMessage.content,
+      conversation_id,
+      stage: result.conversationStage
+    });
   } catch (error) {
-    console.error("--- Error during graph invocation ---", error);
-    res.status(500).send("Internal server error.");
+    console.error("API Error:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// Basic root endpoint for testing the server
-app.get('/', (req, res) => {
-  res.send("LangGraph Gemini API (with History) is running.");
-});
-
-// Start the server
+// Start server
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
-  console.log(`Server is running on http://127.0.0.1:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
-// Add the new node to the workflow
-workflow.addNode('modify_price', modifyPriceNode);
-
-// Add an edge from 'gemini_caller' to 'modify_price'
-workflow.addEdge('gemini_caller', 'modify_price');
-
-// Define the 'modify_price' node function
-async function modifyPriceNode(state: GraphState) {
-  console.log("--- Modifying Price ---");
-
-  // Example logic to modify a price (this is just a placeholder)
-  const modifiedMessage = new AIMessage("The price has been modified as per your request.");
-  return { messages: [...state.messages, modifiedMessage] };
-}
-
-// Add the 'modify_price' node to the workflow
-workflow.addNode('modify_price', modifyPriceNode);
-
-// Add an edge from 'modify_price' to END
-workflow.addEdge('modify_price', END);
-workflow.addEdge('modify_price', END);
